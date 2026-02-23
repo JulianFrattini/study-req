@@ -1,0 +1,132 @@
+---
+title: "Simulation"
+author: "Anonymous"
+date: "2026-02-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(patchwork)
+library(ggdag)
+```
+
+```{r configuration}
+granularity <- 101
+```
+
+## Setup
+
+There is no native way of calculating the cumulative distribution function (CDF) in R.
+Hence, we define our own custom function.
+
+```{r calc-cdf}
+cdf.beta <- function(alpha = 2, beta = 2, x = NA) {
+  # calculate the probability density function
+  pdf <- dbeta(seq(from = 0, to = 1, length.out = granularity), alpha, beta)
+
+  # calculate the cumulative distribution function
+  cdf <- c(0)
+  for (i in 2:101) {
+    cdf[i] <- cdf[i-1] + pdf[i]
+  }
+  cdf <- cdf/100
+  
+  if(is.na(x)) {
+    return(cdf)
+  } else {
+    return(cdf[(granularity-1)*x + 1])
+  }
+}
+```
+
+The following helper function allows plotting the CDF of a Beta-distribution.
+
+```{r visualize-cdf}
+plot.cdf <- function(cdf) {
+  plt <- data.frame(
+    x = seq(0, 1, length.out = granularity),
+    y = cdf
+  ) %>% 
+    ggplot(aes(x = x, y = y)) +
+      geom_line() +
+      labs(x = "Resources", y = "Information density") +
+      theme_bw()
+  
+  return(plt)
+}
+```
+
+```{r example}
+plot.cdf(cdf.beta(alpha = 5, beta = 2))
+```
+
+## Application
+
+The following subsections illustrate the application of the simulation framework.
+
+### Chain
+
+```{r chain-dag}
+dag <- dagify(
+  reng ~ customer + context,
+  srs ~ reng,
+  
+  exposure = "customer", outcome = "srs",
+  labels = c(customer = "Customer", reng = "Requirements Engineer", 
+             srs = "Requirements Specification", context = "Context Knowledge"),
+  
+  coords = list(
+    x = c(customer = 0, reng = 1, srs = 2, context = 1),
+    y = c(customer = 0, reng = 0, srs = 0, context = 1)
+  )
+)
+
+# visualize the DAG
+ggdag_status(dag, use_labels = "label", text = FALSE) +
+  guides(fill = "none", color = "none") + 
+  theme_dag()
+```
+
+```{r chain-components}
+plt.reng <- plot.cdf(cdf.beta(alpha = 2, beta = 5))
+plt.srs <- plot.cdf(cdf.beta(alpha = 5, beta = 2))
+
+plt.reng | plt.srs
+```
+
+```{r}
+cdf.beta(2, 5, 0.4)
+```
+
+
+```{r}
+cdf.beta(5, 2, cdf.beta(2, 5, 0.5))
+```
+
+### Fork
+
+```{r fork-dag}
+dag <- dagify(
+  reng ~ customer,
+  srs ~ reng,
+  tester ~ srs + customer,
+  
+  exposure = "customer", outcome = "tester",
+  labels = c(customer = "Customer", reng = "Requirements Engineer", 
+             srs = "Requirements Specification", tester = "Software Tester"),
+  
+  coords = list(
+    x = c(customer = 0, reng = 1, srs = 2, tester = 3),
+    y = c(customer = 0, reng = 1, srs = 1, tester = 0.5)
+  )
+)
+
+# visualize the DAG
+ggdag_status(dag, use_labels = "label", text = FALSE) +
+  guides(fill = "none", color = "none") + 
+  theme_dag()
+```
+
