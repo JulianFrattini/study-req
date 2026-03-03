@@ -53,6 +53,7 @@ plot.cdf <- function(cdf) {
     ggplot(aes(x = x, y = y)) +
       geom_line() +
       labs(x = "Resources", y = "Information density") +
+      ylim(0, 1) +
       theme_bw()
   
   return(plt)
@@ -71,16 +72,16 @@ The following subsections illustrate the application of the simulation framework
 
 ```{r chain-dag}
 dag <- dagify(
-  reng ~ customer + context,
+  reng ~ customer,
   srs ~ reng,
   
   exposure = "customer", outcome = "srs",
   labels = c(customer = "Customer", reng = "Requirements Engineer", 
-             srs = "Requirements Specification", context = "Context Knowledge"),
+             srs = "Requirements Specification"),
   
   coords = list(
-    x = c(customer = 0, reng = 1, srs = 2, context = 1),
-    y = c(customer = 0, reng = 0, srs = 0, context = 1)
+    x = c(customer = 0, reng = 1, srs = 2),
+    y = c(customer = 0, reng = 0, srs = 0)
   )
 )
 
@@ -97,30 +98,28 @@ plt.srs <- plot.cdf(cdf.beta(alpha = 5, beta = 2))
 plt.reng | plt.srs
 ```
 
-```{r}
-cdf.beta(2, 5, 0.4)
-```
+### Joint node
 
+The following case illustrates a **joint**, i.e., a node where two *alternative* paths collide and the node needs to decide, which path to take.
+Naturally, the node will choose the path based on efficiency, i.e., the relationship between information output and cost.
+In the example, we consider two paths:
 
-```{r}
-cdf.beta(5, 2, cdf.beta(2, 5, 0.5))
-```
-
-### Fork
+1. Formal path: Customer $\rightarrow$ Requirements Engineer $\rightarrow$ Requirements Specification $\rightarrow$ Developer
+2. Informal path: Customer $\rightarrow$ Developer
 
 ```{r fork-dag}
 dag <- dagify(
   reng ~ customer,
   srs ~ reng,
-  tester ~ srs + customer,
+  dev ~ srs + customer,
   
-  exposure = "customer", outcome = "tester",
+  exposure = "customer", outcome = "dev",
   labels = c(customer = "Customer", reng = "Requirements Engineer", 
-             srs = "Requirements Specification", tester = "Software Tester"),
+             srs = "Requirements Specification", dev = "Developer"),
   
   coords = list(
-    x = c(customer = 0, reng = 1, srs = 2, tester = 3),
-    y = c(customer = 0, reng = 1, srs = 1, tester = 0.5)
+    x = c(customer = 0, reng = 1, srs = 2, dev = 3),
+    y = c(customer = 0, reng = 1, srs = 1, dev = 0.5)
   )
 )
 
@@ -130,3 +129,252 @@ ggdag_status(dag, use_labels = "label", text = FALSE) +
   theme_dag()
 ```
 
+Each transfer of information $x \rightarrow y$ is defined by a transfer function:
+
+$$f(i: \text{information}, c: \text{complexity}, s: \text{skill}, t: \text{time}) \rightarrow i: \text{information}$$
+
+For simplicity, we reduce the number of influencing factors to four:
+
+1. **Input information** $i \in [0; 1]$, the information provided by the sender
+2. **Task complexity** $c \in \mathbb{R}^+$, the baseline challenge of the performed activity
+3. **Stakeholder skill** $s \in \mathbb{R}^+$, the ability of the stakeholder performing the activity
+4. **Time spent** $t \in [0; 1]$, the amount of resources (here measured in hours) invested into the activity
+
+The function $f(i, c, s, t)$ is then realized as the cumulative distribution function of a beta-distribution:
+
+$$f(i, c, s, t) = \text{CDF}_\beta(\alpha = c, \beta = s, t) * i$$
+
+This way, higher values of complexity $c$ will make transferring more difficult, but higher values of skill $s$ make it easier.
+The more time $t$ spent on the activity, the more information will be transferred.
+Finally, the input information $i$ defines the upper bound of information to transfer.
+The following figure illustrates the relation between the variables.
+
+```{r functional-definition}
+f2 <- function(i, c, s, t) {
+  return(cdf.beta(alpha = c, beta = s, x = t)*i)
+}
+
+c.high <- 6
+c.low <- 2
+s.low <- 1
+s.high <- 5
+
+p1 <- plot.cdf(cdf.beta(alpha = c.low, beta = s.low)) + ggtitle("Low skill, low complexity")
+p2 <- plot.cdf(cdf.beta(alpha = c.low, beta = s.high)) + ggtitle("High skill, low complexity")
+p3 <- plot.cdf(cdf.beta(alpha = c.high, beta = s.low)) + ggtitle("Low skill, high complexity")
+p4 <- plot.cdf(cdf.beta(alpha = c.high, beta = s.high)) + ggtitle("High skill, high complexity")
+
+(p1 | p2) / (p3 | p4)
+```
+
+Now we can simulate the case above in two scenarios: waterfall and agile.
+The main difference is that in the waterfall scenario, the complexity of the *direct communication* (customer $\rightarrow$ developer) is much higher than in the agile scenario.
+
+```{r scenario-waterfall}
+# configuration
+info.customer <- 0.8
+# elicitation activity (customer -> req engineer)
+c.elicitation <- 6
+s.elicitation <- 5
+t.elicitation <- 0.8
+# specification activity (req engineer -> specification)
+c.specification <- 4
+s.specification <- 7
+t.specification <- 0.7
+# reading activity (specification -> developer)
+c.reading <- 2
+s.reading <- 4
+t.reading <- 0.6
+# direct communication activity (customer -> developer)
+c.direct <- 12
+s.direct <- 3
+t.direct <- 0.9
+
+# simulation
+info.elicitation <- f2(i = info.customer, c = c.elicitation, s = s.elicitation, t = t.elicitation)
+info.specification <- f2(i = info.elicitation, c = c.specification, s = s.specification, t = t.specification)
+info.reading <- f2(i = info.specification, c = c.reading, s = s.reading, t = t.reading)
+info.reading
+
+info.communicating <- f2(i = info.customer, c = c.direct, s = s.direct, t = t.direct)
+info.communicating
+
+# visualization
+plt.customer2reng <- plot.cdf(cdf.beta(alpha = c.elicitation, beta = s.elicitation) * info.customer) + 
+  geom_vline(xintercept = t.elicitation, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.customer, color = "grey", linetype = "dashed") + 
+  ggtitle("Customer -> Req Engineer")
+plt.reng2srs <- plot.cdf(cdf.beta(alpha = c.specification, beta = s.specification) * info.specification) + 
+  geom_vline(xintercept = t.specification, color = "red", linetype = "dashed") +  
+  ggtitle("Req Engineer -> Req Specification")
+plt.srs2dev <- plot.cdf(cdf.beta(alpha = c.reading, beta = s.reading) * info.reading) + 
+  geom_vline(xintercept = info.reading, color = "red", linetype = "dashed") + 
+  ggtitle("Req Specification -> Developer")
+
+plt.customer2dev <- plot.cdf(cdf.beta(alpha = c.direct, beta = s.direct) * info.customer) +
+  geom_vline(xintercept = t.direct, color = "red", linetype = "dashed") + 
+  ggtitle("Customer -> Developer")
+
+(plt.customer2reng | plt.reng2srs) / (plt.srs2dev | plt.customer2dev)
+```
+
+```{r scenario-waterfall}
+# configuration
+info.customer <- 0.8
+# elicitation activity (customer -> req engineer)
+c.elicitation <- 6
+s.elicitation <- 5
+t.elicitation <- 0.8
+# specification activity (req engineer -> specification)
+c.specification <- 4
+s.specification <- 7
+t.specification <- 0.7
+# reading activity (specification -> developer)
+c.reading <- 2
+s.reading <- 4
+t.reading <- 0.7
+# direct communication activity (customer -> developer)
+c.direct <- 5
+s.direct <- 3
+t.direct <- 0.9
+
+# simulation
+info.elicitation <- f2(i = info.customer, c = c.elicitation, s = s.elicitation, t = t.elicitation)
+info.specification <- f2(i = info.elicitation, c = c.specification, s = s.specification, t = t.specification)
+info.reading <- f2(i = info.specification, c = c.reading, s = s.reading, t = t.reading)
+info.reading
+info.communicating <- f2(i = info.customer, c = c.direct, s = s.direct, t = t.direct)
+info.communicating
+
+# visualization
+plt.customer2reng <- plot.cdf(cdf.beta(alpha = c.elicitation, beta = s.elicitation) * info.customer) + 
+  geom_vline(xintercept = t.elicitation, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = info.customer, color = "grey", linetype = "dashed") +  
+  ggtitle("Customer -> Req Engineer")
+plt.reng2srs <- plot.cdf(cdf.beta(alpha = c.specification, beta = s.specification) * info.specification) + 
+  geom_vline(xintercept = t.specification, color = "red", linetype = "dashed") +  
+  ggtitle("Req Engineer -> Req Specification")
+plt.srs2dev <- plot.cdf(cdf.beta(alpha = c.reading, beta = s.reading) * info.reading) + 
+  geom_vline(xintercept = t.reading, color = "red", linetype = "dashed") + 
+  ggtitle("Req Specification -> Developer")
+
+plt.customer2dev <- plot.cdf(cdf.beta(alpha = c.direct, beta = s.direct) * info.communicating) +
+  geom_vline(xintercept = t.direct, color = "red", linetype = "dashed") + 
+  ggtitle("Customer -> Developer")
+
+(plt.customer2reng | plt.reng2srs) / (plt.srs2dev | plt.customer2dev)
+```
+
+### old
+
+```{r functional-definition}
+f <- function(i, c, s, t) {
+  return(cdf.beta(max(0, c - s), t, i))
+}
+
+c <- 6 # baseline complexity
+s.low <- 1
+s.high <- 5
+
+t.low <- 2
+t.high <- 5
+
+p1 <- plot.cdf(cdf.beta(alpha = c - s.low, beta = t.low)) + ggtitle("Little time, low skill")
+p2 <- plot.cdf(cdf.beta(alpha = c - s.high, beta = t.low)) + ggtitle("Little time, high skill")
+p3 <- plot.cdf(cdf.beta(alpha = c - s.low, beta = t.high)) + ggtitle("Much time, low skill")
+p4 <- plot.cdf(cdf.beta(alpha = c - s.high, beta = t.high)) + ggtitle("Much time, high skill")
+
+(p1 | p2) / (p3 | p4)
+```
+
+```{r scenario-waterfall}
+# configuration
+info.customer <- 0.8
+# elicitation activity (customer -> req engineer)
+c.elicitation <- 6
+s.elicitation <- 3
+t.elicitation <- 2
+# specification activity (req engineer -> specification)
+c.specification <- 4
+s.specification <- 2
+t.specification <- 2
+# reading activity (specification -> developer)
+c.reading <- 2
+s.reading <- 1
+t.reading <- 3
+# direct communication activity (customer -> developer)
+c.direct <- 12
+s.direct <- 1
+t.direct <- 4
+
+# simulation
+info.elicitation <- f(i = info.customer, c = c.elicitation, s = s.elicitation, t = t.elicitation)
+info.specification <- f(i = info.elicitation, c = c.specification, s = s.specification, t = t.specification)
+info.reading <- f(i = info.specification, c = c.reading, s = s.reading, t = t.reading)
+info.reading
+info.communicating <- f(i = info.customer, c = c.direct, s = s.direct, t = t.direct)
+info.communicating
+
+# visualization
+plt.customer2reng <- plot.cdf(cdf.beta(alpha = c.elicitation-s.elicitation, beta = t.elicitation)) + 
+  geom_vline(xintercept = info.customer, color = "red", linetype = "dashed") + 
+  ggtitle("Customer -> Req Engineer")
+plt.reng2srs <- plot.cdf(cdf.beta(alpha = c.specification-s.specification, beta = t.specification)) + 
+  geom_vline(xintercept = info.elicitation, color = "red", linetype = "dashed") +  
+  ggtitle("Req Engineer -> Req Specification")
+plt.srs2dev <- plot.cdf(cdf.beta(alpha = c.reading-s.reading, beta = t.reading)) + 
+  geom_vline(xintercept = info.specification, color = "red", linetype = "dashed") + 
+  ggtitle("Req Specification -> Developer")
+
+plt.customer2dev <- plot.cdf(cdf.beta(alpha = c.direct-s.direct, beta = t.direct)) +
+  geom_vline(xintercept = info.customer, color = "red", linetype = "dashed") + 
+  ggtitle("Customer -> Developer")
+
+(plt.customer2reng | plt.reng2srs) / (plt.srs2dev | plt.customer2dev)
+```
+
+```{r scenario-agile}
+# configuration
+info.customer <- 0.8
+# elicitation activity (customer -> req engineer)
+c.elicitation <- 6
+s.elicitation <- 3
+t.elicitation <- 2
+# specification activity (req engineer -> specification)
+c.specification <- 4
+s.specification <- 2
+t.specification <- 2
+# reading activity (specification -> developer)
+c.reading <- 2
+s.reading <- 1
+t.reading <- 3
+# direct communication activity (customer -> developer)
+c.direct <- 5
+s.direct <- 1
+t.direct <- 2
+
+# simulation
+info.elicitation <- f(i = info.customer, c = c.elicitation, s = s.elicitation, t = t.elicitation)
+info.specification <- f(i = info.elicitation, c = c.specification, s = s.specification, t = t.specification)
+info.reading <- f(i = info.specification, c = c.reading, s = s.reading, t = t.reading)
+info.reading
+info.communicating <- f(i = info.customer, c = c.direct, s = s.direct, t = t.direct)
+info.communicating
+
+# visualization
+plt.customer2reng <- plot.cdf(cdf.beta(alpha = c.elicitation-s.elicitation, beta = t.elicitation)) + 
+  geom_vline(xintercept = info.customer, color = "red", linetype = "dashed") + 
+  ggtitle("Customer -> Req Engineer")
+plt.reng2srs <- plot.cdf(cdf.beta(alpha = c.specification-s.specification, beta = t.specification)) + 
+  geom_vline(xintercept = info.elicitation, color = "red", linetype = "dashed") +  
+  ggtitle("Req Engineer -> Req Specification")
+plt.srs2dev <- plot.cdf(cdf.beta(alpha = c.reading-s.reading, beta = t.reading)) + 
+  geom_vline(xintercept = info.specification, color = "red", linetype = "dashed") + 
+  ggtitle("Req Specification -> Developer")
+
+plt.customer2dev <- plot.cdf(cdf.beta(alpha = c.direct-s.direct, beta = t.direct)) +
+  geom_vline(xintercept = info.customer, color = "red", linetype = "dashed") + 
+  ggtitle("Customer -> Developer")
+
+(plt.customer2reng | plt.reng2srs) / (plt.srs2dev | plt.customer2dev)
+```
