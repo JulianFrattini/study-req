@@ -1,0 +1,315 @@
+---
+title: "Simulation"
+author: "Anonymous"
+date: "2026-02-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(patchwork)
+library(ggdag)
+
+source("util.R")
+granularity <- 101 # specify the granularity with which to plot the CDF functions
+```
+
+This notebook contains the simulation of a type II formalization of the requirements engineering (RE) phase from an information-based perspective.
+The simulation is based on cumulative distribution-functions of the beta-distribution, which is defined by two parameters.
+
+## Case
+
+The illustrated case focuses on one information storage (a developer) requiring information.
+In the example, the developer has two options:
+
+1. Formal path: Customer $\rightarrow$ Requirements Engineer $\rightarrow$ Requirements Specification $\rightarrow$ Developer
+2. Informal path: Customer $\rightarrow$ Developer
+
+According to the information-based perspective, the developer would chose the path of least resistance.
+In this case, resistance is operationalized via *effectiveness*, i.e., the developer gravitates towards the path that provides the most information.
+
+```{r fork-dag}
+dag <- dagify(
+  reng ~ customer,
+  srs ~ reng,
+  dev ~ srs + customer,
+  
+  exposure = "customer", outcome = "dev",
+  labels = c(customer = "Customer", reng = "Requirements Engineer", 
+             srs = "Requirements Specification", dev = "Developer"),
+  
+  coords = list(
+    x = c(customer = 0, reng = 1, srs = 2, dev = 3),
+    y = c(customer = 0, reng = 1, srs = 1, dev = 0)
+  )
+)
+
+# visualize the DAG
+ggdag_status(dag, use_labels = "label", text = FALSE) +
+  guides(fill = "none", color = "none") + 
+  theme_dag()
+```
+
+## Formalism
+
+Each transfer of information $x \rightarrow y$ is defined by a transfer function:
+
+$$f(i: \text{information}, c: \text{complexity}, s: \text{skill}, t: \text{time}, t_{max}: \text{time}) \rightarrow i: \text{information}$$
+
+For simplicity, we reduce the number of influencing factors to four:
+
+1. **Input information** $i \in [0; 1]$, the information provided by the sender
+2. **Task complexity** $c \in \mathbb{R}^+$, the baseline challenge of the performed activity
+3. **Stakeholder skill** $s \in \mathbb{R}^+$, the ability of the stakeholder performing the activity
+4. **Time spent** $t \in [0; t_{max}]$, the amount of resources (here measured in hours) invested into the activity
+4. **Maximum time** $t_{max} \in \mathbb{R}^+$, the amount of resources (here measured in hours) the activity would require to output 100% information.
+
+```{r functional-definition}
+f <- function(i, c, s, t, tmax) {
+  return(cdf.beta(alpha = c, beta = s, x = t, range = tmax)*i)
+}
+```
+
+The function $f(i, c, s, t, t_{max})$ is then realized as the cumulative distribution function of a beta-distribution:
+
+$$f(i, c, s, t) = \text{CDF}_\beta \left( \alpha = c, \beta = s, x = \frac{t}{t_{max}} \right) * i$$
+
+This way, higher values of complexity $c$ will make transferring more difficult, but higher values of skill $s$ make it easier.
+The more time $t$ spent on the activity, the more information will be transferred.
+Finally, the input information $i$ defines the upper bound of information to transfer.
+The following figure illustrates the relation between the variables.
+
+```{r paramter-illustration}
+t <- 2.5
+tmax <- 5
+
+d <- expand.grid(
+  x = seq(from = 0, to = 5, length.out = granularity),
+  complexity = c(2, 6),
+  skill = c(1, 5)
+) %>% 
+  rowwise() %>% 
+  mutate(i = cdf.beta(alpha = complexity, beta = skill, x = x, range = tmax))
+
+d.hline <- expand.grid(
+  complexity = c(2, 6),
+  skill = c(1, 5)
+) %>% 
+  rowwise() %>%
+  mutate(hline = cdf.beta(alpha = complexity, beta = skill, x = t, range = tmax)) %>% 
+  mutate(
+    complexity = ifelse(complexity == 2, "Low complexity", "High complexity"),
+    skill = ifelse(skill == 1, "Low skill", "High skill")
+  )
+
+d %>% 
+  mutate(
+    complexity = ifelse(complexity == 2, "Low complexity", "High complexity"),
+    skill = ifelse(skill == 1, "Low skill", "High skill")
+  ) %>% 
+  ggplot(aes(x = x, y = i)) +
+    geom_line() +
+    facet_grid(rows = vars(complexity), cols = vars(skill)) +
+    labs(x = "Invested time t", y = "Information output") +
+    geom_vline(xintercept = t, color = "red", linetype = "dashed") +
+    geom_hline(data = d.hline, aes(yintercept = hline), color = "grey", linetype = "dashed") +
+    theme_bw()
+
+ggsave("../figures/results/sim-function.pdf", device = "pdf", unit = "cm", width = 11, height = 7)
+```
+
+## Simulation
+
+Now we can simulate the case above in two scenarios: waterfall and agile.
+The main difference is that in the waterfall scenario, the complexity of the *direct communication* (customer $\rightarrow$ developer) is much higher than in the agile scenario.
+
+```{r scenario-waterfall}
+# configuration
+info.customer <- 0.8
+# elicitation activity (customer -> req engineer)
+c.elicitation <- 6
+s.elicitation <- 5
+t.elicitation <- 6
+tmax.elicitation <- 8
+# specification activity (req engineer -> specification)
+c.specification <- 4
+s.specification <- 7
+t.specification <- 3
+tmax.specification <- 6
+# reading activity (specification -> developer)
+c.reading <- 2
+s.reading <- 4
+t.reading <- 2
+tmax.reading <- 3
+# direct communication activity (customer -> developer)
+c.direct <- 12
+s.direct <- 3
+t.direct <- 6
+tmax.direct <- 8
+
+# simulation
+info.elicitation <- f(i = info.customer, c = c.elicitation, s = s.elicitation, 
+                       t = t.elicitation, tmax = tmax.elicitation)
+info.specification <- f(i = info.elicitation, c = c.specification, s = s.specification, 
+                         t = t.specification, tmax = tmax.specification)
+info.reading <- f(i = info.specification, c = c.reading, s = s.reading, 
+                   t = t.reading, tmax = tmax.reading)
+info.communicating <- f(i = info.customer, c = c.direct, s = s.direct, 
+                         t = t.direct, tmax = tmax.direct)
+print(paste0("Information flow via the traditional path: elicitation (", info.elicitation, 
+             "), specifiation (", info.specification, "), reading (", info.reading, ")"))
+print(paste0("Information flow via the agile path: directly communicating (", info.communicating, ")"))
+
+# visualization
+plt.customer2reng <- plot.cdf(cdf.beta(alpha = c.elicitation, beta = s.elicitation) * info.customer, 
+                              range = tmax.elicitation) + 
+  geom_vline(xintercept = t.elicitation, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.elicitation, color = "grey", linetype = "dashed") + 
+  ggtitle("Customer -> Req Engineer")
+plt.reng2srs <- plot.cdf(cdf.beta(alpha = c.specification, beta = s.specification) * info.elicitation, 
+                         range = tmax.specification) + 
+  geom_vline(xintercept = t.specification, color = "red", linetype = "dashed") +  
+  geom_hline(yintercept = info.specification, color = "grey", linetype = "dashed") + 
+  ggtitle("Req Engineer -> Req Specification")
+plt.srs2dev <- plot.cdf(cdf.beta(alpha = c.reading, beta = s.reading) * info.specification, 
+                        range = tmax.reading) + 
+  geom_vline(xintercept = t.reading, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.reading, color = "grey", linetype = "dashed") + 
+  ggtitle("Req Specification -> Developer")
+
+plt.customer2dev <- plot.cdf(cdf.beta(alpha = c.direct, beta = s.direct) * info.customer, 
+                             range = tmax.direct) +
+  geom_vline(xintercept = t.direct, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.communicating, color = "grey", linetype = "dashed") + 
+  ggtitle("Customer -> Developer")
+
+(plt.customer2reng | plt.reng2srs) / (plt.srs2dev | plt.customer2dev)
+```
+
+Now, when just reducing the complexity of the *directly communicating* transfer from `c=12` to `c=5`, the resulting information flow will be entirely different.
+
+```{r scenario-agile}
+# configuration
+info.customer <- 0.8
+# elicitation activity (customer -> req engineer)
+c.elicitation <- 6
+s.elicitation <- 5
+t.elicitation <- 6
+tmax.elicitation <- 8
+# specification activity (req engineer -> specification)
+c.specification <- 4
+s.specification <- 7
+t.specification <- 3
+tmax.specification <- 6
+# reading activity (specification -> developer)
+c.reading <- 2
+s.reading <- 4
+t.reading <- 2
+tmax.reading <- 3
+# direct communication activity (customer -> developer)
+c.direct <- 5
+s.direct <- 3
+t.direct <- 6
+tmax.direct <- 8
+
+# simulation
+info.elicitation <- f(i = info.customer, c = c.elicitation, s = s.elicitation, 
+                       t = t.elicitation, tmax = tmax.elicitation)
+info.specification <- f(i = info.elicitation, c = c.specification, s = s.specification, 
+                         t = t.specification, tmax = tmax.specification)
+info.reading <- f(i = info.specification, c = c.reading, s = s.reading, 
+                   t = t.reading, tmax = tmax.reading)
+
+info.communicating <- f(i = info.customer, c = c.direct, s = s.direct, 
+                         t = t.direct, tmax = tmax.direct)
+print(paste0("Information flow via the traditional path: elicitation (", info.elicitation, 
+             "), specifiation (", info.specification, "), reading (", info.reading, ")"))
+print(paste0("Information flow via the agile path: directly communicating (", info.communicating, ")"))
+
+# visualization
+plt.customer2reng <- plot.cdf(cdf.beta(alpha = c.elicitation, beta = s.elicitation) * info.customer, 
+                              range = tmax.elicitation) + 
+  geom_vline(xintercept = t.elicitation, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.elicitation, color = "grey", linetype = "dashed") + 
+  ggtitle("Customer -> Req Engineer")
+plt.reng2srs <- plot.cdf(cdf.beta(alpha = c.specification, beta = s.specification) * info.elicitation, 
+                         range = tmax.specification) + 
+  geom_vline(xintercept = t.specification, color = "red", linetype = "dashed") +  
+  geom_hline(yintercept = info.specification, color = "grey", linetype = "dashed") + 
+  ggtitle("Req Engineer -> Req Specification")
+plt.srs2dev <- plot.cdf(cdf.beta(alpha = c.reading, beta = s.reading) * info.specification, 
+                        range = tmax.reading) + 
+  geom_vline(xintercept = t.reading, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.reading, color = "grey", linetype = "dashed") + 
+  ggtitle("Req Specification -> Developer")
+
+plt.customer2dev <- plot.cdf(cdf.beta(alpha = c.direct, beta = s.direct) * info.customer, 
+                             range = tmax.direct) +
+  geom_vline(xintercept = t.direct, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.communicating, color = "grey", linetype = "dashed") + 
+  ggtitle("Customer -> Developer")
+
+(plt.customer2reng | plt.reng2srs) / (plt.srs2dev | plt.customer2dev)
+```
+
+Once the complexity of the *directly communicating* transfer drops below 6, the agile path exhibits lower resistance. 
+From an effectiveness perspective, this path then becomes preferable.
+
+## Plotting
+
+Finally, we plot some of the transfer functions for visualization in the manuscript.
+
+```{r plot-elicitation}
+plot.cdf(cdf.beta(alpha = c.elicitation, beta = s.elicitation) * info.customer, 
+                              range = tmax.elicitation) + 
+  geom_vline(xintercept = t.elicitation, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.elicitation, color = "grey", linetype = "dashed") +
+  labs(x = "Time spent", y = "Info. output")
+
+ggsave("../figures/results/sim-interviewing.png", device = "png", unit = "cm", width = 6, height = 3.5)
+```
+
+```{r plot-specification}
+plot.cdf(cdf.beta(alpha = c.specification, beta = s.specification) * info.elicitation, 
+                         range = tmax.specification) + 
+  geom_vline(xintercept = t.specification, color = "red", linetype = "dashed") +  
+  geom_hline(yintercept = info.specification, color = "grey", linetype = "dashed") +
+  labs(x = "Time spent", y = "Info. output")
+
+ggsave("../figures/results/sim-documenting.png", device = "png", unit = "cm", width = 6, height = 3.5)
+```
+
+```{r plot-reading}
+plot.cdf(cdf.beta(alpha = c.reading, beta = s.reading) * info.specification, 
+                        range = tmax.reading) + 
+  geom_vline(xintercept = t.reading, color = "red", linetype = "dashed") + 
+  geom_hline(yintercept = info.reading, color = "grey", linetype = "dashed") +
+  labs(x = "Time spent", y = "Info. output")
+
+ggsave("../figures/results/sim-reading.png", device = "png", unit = "cm", width = 6, height = 3.5)
+```
+
+```{r plot-communicating}
+i.communicating.waterfall <- cdf.beta(alpha = 12, beta = 3, x = 6, range = 8)*info.customer
+i.communicating.agile <- cdf.beta(alpha = 5, beta = 3, x = 6, range = 8)*info.customer
+
+data.frame(
+  x = seq(0, 8, length.out = granularity),
+  Waterfall = cdf.beta(alpha = 12, beta = 3) * info.customer,
+  Agile = cdf.beta(alpha = 5, beta = 3) * info.customer
+) %>% 
+  pivot_longer(cols = c("Waterfall", "Agile"), names_to = "Scenario", values_to = "i") %>% 
+  ggplot(aes(x = x, y = i, color = Scenario)) +
+    geom_line(aes(group = Scenario)) +
+    labs(x = "Time spent", y = "Info. output") +
+    geom_vline(xintercept = t.direct, color = "grey", linetype = "dashed") + 
+    geom_hline(yintercept = i.communicating.waterfall, color = "#006D70", linetype = "dashed") +
+    geom_hline(yintercept = i.communicating.agile, color = "#D0180A", linetype = "dashed") +
+    ylim(0, 1) +
+    theme_bw() +
+    theme(legend.position = "right")
+
+ggsave("../figures/results/sim-communicating.png", device = "png", unit = "cm", width = 7.5, height = 3.5)
+```
