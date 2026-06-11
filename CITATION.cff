@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use this artifact, please cite it as below."
+type: software
+title: >-
+  Information is all you need: Requirements Engineering Quality Reframed - Replication Package
+authors:
+  - given-names: Henning
+    family-names: Femmer
+    email: femmer.henning@fh-swf.de
+    affiliation: Fachhochschule Südwestfalen
+    orcid: 'https://orcid.org/0000-0002-6059-4635'
+  - given-names: Julian
+    family-names: Frattini
+    affiliation: >-
+      Chalmers University of Technology and University of
+      Gothenburg
+    email: julian.frattini@chalmers.se
+    orcid: 'https://orcid.org/0000-0003-3995-6125'
+repository-code: "https://github.com/JulianFrattini/study-req"
+url: "https://github.com/JulianFrattini/study-req"
+license: MIT
+preferred-citation:
+  type: conference-paper
+  title: "Information is all you need: Requirements Engineering Quality Reframed"
+  authors:
+    - family-names: "Femmer"
+      given-names: "Henning"
+    - family-names: "Frattini"
+      given-names: "Julian"
+  collection-title: "2026 34th IEEE International Requirements Engineering Conference (RE)"
+  year: 2026
+  conference:
+    name: "IEEE International Requirements Engineering Conference"
+    alias: "RE"
+    date-start: 2026-08-17
+    date-end: 2026-08-21
+  publisher:
+    name: "IEEE"
+  # doi: "10.1109/RE.2026.XXXXX"  # Add when available
+  # start: 1  # Add page numbers when available
+  # end: 10
