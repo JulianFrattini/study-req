@@ -19,6 +19,7 @@ This repository contains the following files:
 │   │   └── simulation.pdf: flowchart of a type II formalization
 │   └── results: figures generated during the simulation
 ├── presentations: slide decks for presenting this work
+│   ├── re26-req.pptx: presentation of the work at the RE'26 conference
 │   └── siren26-req.pptx: presentation of the work at the SiREN'26 meeting
 ├── src: source code used in this study
 │   ├── simulation-beta.Rmd : type II formalization of information flow

@@ -1,6 +1,6 @@
 ---
 title: "Simulation"
-author: "Anonymous"
+author: "Julian Frattini"
 date: "2026-02-22"
 output: html_document
 ---
